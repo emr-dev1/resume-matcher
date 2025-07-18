@@ -1,14 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
+from typing import List, Optional, Any
 import pandas as pd
+import numpy as np
 import io
 
 from app.models.database import Project, Position, Resume, Match, get_db
 from pydantic import BaseModel
 
 router = APIRouter()
+
+
+def clean_nan_values(data: Any) -> Any:
+    """Recursively clean NaN values from data structures"""
+    if isinstance(data, dict):
+        return {k: clean_nan_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_nan_values(item) for item in data]
+    elif isinstance(data, float) and (np.isnan(data) or np.isinf(data)):
+        return None
+    elif pd.isna(data):
+        return None
+    else:
+        return data
 
 
 class MatchResult(BaseModel):
@@ -50,7 +65,7 @@ async def get_project_matches(
             resume_filename=resume.filename,
             similarity_score=match.similarity_score,
             rank=match.rank,
-            position_data={col: position.original_data.get(col) for col in position.output_columns}
+            position_data=clean_nan_values({col: position.original_data.get(col) for col in position.output_columns})
         ))
     
     return matches
@@ -83,7 +98,7 @@ async def get_match_details(match_id: int, db: AsyncSession = Depends(get_db)):
         },
         "position": {
             "id": position.id,
-            "data": position.original_data,
+            "data": clean_nan_values(position.original_data),
             "embedding_columns": position.embedding_columns,
             "output_columns": position.output_columns
         }
@@ -116,7 +131,12 @@ async def export_results(
         
         # Add position data columns
         for col in position.output_columns:
-            row[f"Position_{col}"] = position.original_data.get(col)
+            value = position.original_data.get(col)
+            # Clean NaN values for export
+            if pd.isna(value) or (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
+                row[f"Position_{col}"] = None
+            else:
+                row[f"Position_{col}"] = value
         
         data.append(row)
     

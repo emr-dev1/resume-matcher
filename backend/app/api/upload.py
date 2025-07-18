@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from typing import List, Dict
+from typing import List, Dict, Any
 import pandas as pd
+import numpy as np
 import json
 import os
 import uuid
@@ -14,6 +15,20 @@ from app.services.pdf_processor import pdf_processor
 from app.services.embedding_service import embedding_service
 
 router = APIRouter()
+
+
+def clean_nan_values(data: Any) -> Any:
+    """Recursively clean NaN values from data structures"""
+    if isinstance(data, dict):
+        return {k: clean_nan_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_nan_values(item) for item in data]
+    elif isinstance(data, float) and (np.isnan(data) or np.isinf(data)):
+        return None
+    elif pd.isna(data):
+        return None
+    else:
+        return data
 
 
 @router.post("/projects/{project_id}/positions")
@@ -216,7 +231,7 @@ async def get_positions(
         position_data = {
             "id": position.id,
             "project_id": position.project_id,
-            "original_data": position.original_data,
+            "original_data": clean_nan_values(position.original_data),
             "embedding_columns": position.embedding_columns,
             "output_columns": position.output_columns,
             "created_at": position.created_at.isoformat() if position.created_at else None
@@ -253,7 +268,7 @@ async def get_resumes(
             "file_path": resume.file_path,
             "extracted_text": resume.extracted_text[:200] + "..." if len(resume.extracted_text) > 200 else resume.extracted_text,  # Truncated for display
             "text_length": len(resume.extracted_text),
-            "file_metadata": resume.file_metadata,
+            "file_metadata": clean_nan_values(resume.file_metadata),
             "status": "processed",  # Since it's in DB, it's processed
             "created_at": resume.created_at.isoformat() if resume.created_at else None
         }
