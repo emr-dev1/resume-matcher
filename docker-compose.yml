@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: people-matcher-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - OLLAMA_HOST=host.docker.internal:11434
+      - DATABASE_URL=sqlite:///app/data/app.db
+      - CORS_ORIGINS=["http://localhost:5173", "http://localhost:3000", "http://localhost"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build: ./client
+    container_name: people-matcher-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    restart: unless-stopped
+
+volumes:
+  data:
+  uploads:
