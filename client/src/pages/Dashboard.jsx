@@ -90,12 +90,6 @@ function Dashboard() {
       }).length,
       icon: Calendar,
       description: 'Projects created this month'
-    },
-    {
-      title: 'Success Rate',
-      value: '94%',
-      icon: TrendingUp,
-      description: 'Average matching accuracy'
     }
   ]
 
@@ -128,7 +122,7 @@ function Dashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {stats.map((stat) => (
           <Card key={stat.title}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
