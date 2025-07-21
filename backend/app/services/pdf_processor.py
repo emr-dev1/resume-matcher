@@ -1,12 +1,14 @@
 import os
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 import PyPDF2
 import easyocr
 import numpy as np
 from PIL import Image
 import io
 import tempfile
+
+from app.services.section_parser import section_parser
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,41 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Error processing PDF {file_path}: {e}")
             return None
+    
+    def extract_and_parse_pdf(self, file_path: str, parsing_method: str = "full_text", 
+                            custom_headers: Optional[Dict[str, Any]] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Extract text and optionally parse into sections"""
+        try:
+            # Extract raw text
+            text = self.extract_text_from_pdf(file_path)
+            if not text:
+                return None, None
+            
+            # If section-based parsing is requested
+            if parsing_method == "section_based":
+                # Extract filename from path
+                filename = os.path.basename(file_path)
+                
+                # Parse into sections
+                parsed_sections = section_parser.parse_resume(
+                    text, 
+                    filename=filename,
+                    return_raw_sections=True
+                )
+                
+                # If custom headers provided, override defaults
+                if custom_headers and parsed_sections and 'raw_sections' in parsed_sections:
+                    # TODO: Apply custom header mappings
+                    pass
+                
+                return text, parsed_sections
+            else:
+                # Just return raw text
+                return text, None
+                
+        except Exception as e:
+            logger.error(f"Error in extract_and_parse_pdf for {file_path}: {e}")
+            return None, None
     
     def _extract_with_pypdf2(self, file_path: str) -> str:
         """Extract text using PyPDF2"""

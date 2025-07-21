@@ -9,7 +9,7 @@ import os
 import uuid
 from pathlib import Path
 
-from app.models.database import Project, Position, Resume, get_db
+from app.models.database import Project, Position, Resume, ParsingConfiguration, get_db
 from app.config import settings
 from app.services.pdf_processor import pdf_processor
 from app.services.embedding_service import embedding_service
@@ -129,6 +129,20 @@ async def upload_resumes(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    # Get parsing configuration for the project
+    config_result = await db.execute(
+        select(ParsingConfiguration).where(ParsingConfiguration.project_id == project_id)
+    )
+    parsing_config = config_result.scalar_one_or_none()
+    
+    # Determine parsing method
+    parsing_method = "full_text"
+    custom_headers = None
+    if parsing_config:
+        parsing_method = parsing_config.parsing_method
+        if not parsing_config.use_default_headers and parsing_config.section_headers:
+            custom_headers = parsing_config.section_headers
+    
     upload_results = []
     
     for file in files:
@@ -159,8 +173,12 @@ async def upload_resumes(
                 })
                 continue
             
-            # Extract text
-            extracted_text = pdf_processor.extract_text_from_pdf(file_path)
+            # Extract text and optionally parse sections
+            extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
+                file_path, 
+                parsing_method=parsing_method,
+                custom_headers=custom_headers
+            )
             
             if not extracted_text:
                 os.remove(file_path)
@@ -180,6 +198,8 @@ async def upload_resumes(
                 filename=file.filename,
                 file_path=file_path,
                 extracted_text=extracted_text,
+                parsed_sections=parsed_sections.get('raw_sections') if parsed_sections else None,
+                parsing_method=parsing_method,
                 embedding=embedding,
                 file_metadata={"original_filename": file.filename}
             )
@@ -268,6 +288,8 @@ async def get_resumes(
             "file_path": resume.file_path,
             "extracted_text": resume.extracted_text[:200] + "..." if len(resume.extracted_text) > 200 else resume.extracted_text,  # Truncated for display
             "text_length": len(resume.extracted_text),
+            "parsed_sections": clean_nan_values(resume.parsed_sections) if resume.parsed_sections else None,
+            "parsing_method": resume.parsing_method or "full_text",
             "file_metadata": clean_nan_values(resume.file_metadata),
             "status": "processed",  # Since it's in DB, it's processed
             "created_at": resume.created_at.isoformat() if resume.created_at else None
@@ -295,3 +317,95 @@ async def get_position_columns(
         "embedding_columns": position.embedding_columns,
         "output_columns": position.output_columns
     }
+
+
+@router.get("/projects/{project_id}/resumes/{resume_id}")
+async def get_resume_details(
+    project_id: int,
+    resume_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed resume information including full text"""
+    result = await db.execute(
+        select(Resume).where(Resume.id == resume_id, Resume.project_id == project_id)
+    )
+    resume = result.scalar_one_or_none()
+    
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    
+    return {
+        "id": resume.id,
+        "project_id": resume.project_id,
+        "filename": resume.filename,
+        "file_path": resume.file_path,
+        "extracted_text": resume.extracted_text,  # Full text for detailed view
+        "text_length": len(resume.extracted_text),
+        "parsed_sections": clean_nan_values(resume.parsed_sections) if resume.parsed_sections else None,
+        "parsing_method": resume.parsing_method or "full_text",
+        "file_metadata": clean_nan_values(resume.file_metadata),
+        "status": "processed",
+        "created_at": resume.created_at.isoformat() if resume.created_at else None
+    }
+
+
+@router.post("/projects/{project_id}/resumes/{resume_id}/reparse")
+async def reparse_resume(
+    project_id: int,
+    resume_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reparse a resume with current parsing configuration"""
+    # Get resume
+    result = await db.execute(
+        select(Resume).where(Resume.id == resume_id, Resume.project_id == project_id)
+    )
+    resume = result.scalar_one_or_none()
+    
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    
+    # Get parsing configuration
+    config_result = await db.execute(
+        select(ParsingConfiguration).where(ParsingConfiguration.project_id == project_id)
+    )
+    parsing_config = config_result.scalar_one_or_none()
+    
+    # Determine parsing method
+    parsing_method = "full_text"
+    custom_headers = None
+    if parsing_config:
+        parsing_method = parsing_config.parsing_method
+        if not parsing_config.use_default_headers and parsing_config.section_headers:
+            custom_headers = parsing_config.section_headers
+    
+    try:
+        # Reparse the PDF
+        extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
+            resume.file_path,
+            parsing_method=parsing_method,
+            custom_headers=custom_headers
+        )
+        
+        if not extracted_text:
+            raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+        
+        # Update resume record
+        resume.extracted_text = extracted_text
+        resume.parsed_sections = parsed_sections.get('raw_sections') if parsed_sections else None
+        resume.parsing_method = parsing_method
+        
+        # Regenerate embedding
+        resume.embedding = await embedding_service.generate_text_embedding(extracted_text)
+        
+        await db.commit()
+        
+        return {
+            "message": "Resume reparsed successfully",
+            "parsing_method": parsing_method,
+            "has_sections": bool(resume.parsed_sections)
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error reparsing resume: {str(e)}")

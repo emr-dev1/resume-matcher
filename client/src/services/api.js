@@ -109,12 +109,51 @@ class ApiClient {
   }
 
   // Results endpoints
-  async getProjectMatches(projectId, positionId = null, limit = 100, offset = 0) {
-    let url = `/api/projects/${projectId}/matches?limit=${limit}&offset=${offset}`;
+  async getProjectMatches(projectId, options = {}) {
+    const { 
+      positionId = null, 
+      limit = null, 
+      offset = 0, 
+      minScore = null 
+    } = options;
+    
+    let url = `/api/projects/${projectId}/matches?offset=${offset}`;
+    
+    if (limit !== null) {
+      url += `&limit=${limit}`;
+    }
     if (positionId) {
       url += `&position_id=${positionId}`;
     }
+    if (minScore !== null) {
+      url += `&min_score=${minScore}`;
+    }
+    
     return this.get(url);
+  }
+
+  async getProjectMatchesCount(projectId, options = {}) {
+    const { positionId = null, minScore = null } = options;
+    
+    let url = `/api/projects/${projectId}/matches/count`;
+    const params = new URLSearchParams();
+    
+    if (positionId) {
+      params.append('position_id', positionId);
+    }
+    if (minScore !== null) {
+      params.append('min_score', minScore);
+    }
+    
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
+    
+    return this.get(url);
+  }
+
+  async getMatchStatistics(projectId) {
+    return this.get(`/api/projects/${projectId}/matches/statistics`);
   }
 
   async getMatchDetails(matchId) {
@@ -131,6 +170,11 @@ class ApiClient {
     return this.get(`/api/projects/${projectId}/resumes`);
   }
 
+  // Get detailed resume information
+  async getResumeDetails(projectId, resumeId) {
+    return this.get(`/api/projects/${projectId}/resumes/${resumeId}`);
+  }
+
   async exportResults(projectId, format = 'csv') {
     const response = await this.request(`/api/projects/${projectId}/export?format=${format}`);
     const blob = await response.blob();
@@ -144,6 +188,41 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  }
+
+  // Parsing configuration endpoints
+  async getParsingConfig(projectId) {
+    return this.get(`/api/projects/${projectId}/parsing-config`);
+  }
+
+  async createParsingConfig(projectId, config) {
+    return this.post(`/api/projects/${projectId}/parsing-config`, config);
+  }
+
+  async updateParsingConfig(projectId, config) {
+    return this.request(`/api/projects/${projectId}/parsing-config`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(config),
+    }).then(res => res.json());
+  }
+
+  async deleteParsingConfig(projectId) {
+    return this.delete(`/api/projects/${projectId}/parsing-config`);
+  }
+
+  async getDefaultSections() {
+    return this.get('/api/parsing-config/default-sections');
+  }
+
+  async getExactSkills() {
+    return this.get('/api/parsing-config/exact-skills');
+  }
+
+  async reparseResume(projectId, resumeId) {
+    return this.post(`/api/projects/${projectId}/resumes/${resumeId}/reparse`, {});
   }
 }
 

@@ -5,7 +5,7 @@ import os
 
 from app.config import settings
 from app.models.database import init_db
-from app.api import projects, upload, processing, results
+from app.api import projects, upload, processing, results, parsing_config
 
 
 
@@ -39,6 +39,7 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(processing.router, prefix="/api", tags=["processing"])
 app.include_router(results.router, prefix="/api", tags=["results"])
+app.include_router(parsing_config.router, prefix="/api", tags=["parsing_config"])
 
 
 @app.get("/")

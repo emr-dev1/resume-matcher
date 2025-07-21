@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, FolderOpen, Calendar, TrendingUp, Trash2, MoreVertical } from 'lucide-react'
+import { Plus, FolderOpen, Calendar, TrendingUp, Trash2, MoreVertical, FileText, Layers, ArrowRight, ArrowLeft } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useProjectStore, useUIStore } from '@/stores'
@@ -11,6 +11,8 @@ function Dashboard() {
   
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
+  const [selectedParsingMethod, setSelectedParsingMethod] = useState('full_text')
+  const [createStep, setCreateStep] = useState(1) // 1: name, 2: parsing method
   const [projectMenuOpen, setProjectMenuOpen] = useState(null)
 
   useEffect(() => {
@@ -37,6 +39,20 @@ function Dashboard() {
   const handleNewProject = () => {
     setShowCreateModal(true)
     setNewProjectName('')
+    setSelectedParsingMethod('full_text')
+    setCreateStep(1)
+  }
+
+  const handleNextStep = () => {
+    if (createStep === 1 && newProjectName.trim()) {
+      setCreateStep(2)
+    }
+  }
+
+  const handlePrevStep = () => {
+    if (createStep === 2) {
+      setCreateStep(1)
+    }
   }
 
   const handleCreateProject = async () => {
@@ -44,17 +60,36 @@ function Dashboard() {
     
     try {
       setLoading(true)
+      // Create project first
       const newProject = await api.createProject(newProjectName.trim())
+      
+      // Set parsing configuration
+      await api.updateParsingConfig(newProject.id, {
+        parsing_method: selectedParsingMethod,
+        use_default_headers: true,
+        section_headers: null,
+        filter_strings: null
+      })
+      
       addProject(newProject)
       setSelectedProject(newProject.id)
       setShowCreateModal(false)
       setNewProjectName('')
+      setSelectedParsingMethod('full_text')
+      setCreateStep(1)
       setCurrentView('project-detail')
     } catch (error) {
       console.error('Error creating project:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleCloseModal = () => {
+    setShowCreateModal(false)
+    setNewProjectName('')
+    setSelectedParsingMethod('full_text')
+    setCreateStep(1)
   }
 
   const handleDeleteProject = async (projectId, projectName) => {
@@ -223,49 +258,144 @@ function Dashboard() {
       {/* Create Project Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Project</h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-2">
-                  Project Name
-                </label>
-                <input
-                  type="text"
-                  id="projectName"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  placeholder="Enter project name..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleCreateProject()
-                    } else if (e.key === 'Escape') {
-                      setShowCreateModal(false)
-                      setNewProjectName('')
-                    }
-                  }}
-                  autoFocus
-                />
-              </div>
-              <div className="flex justify-end space-x-3">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setShowCreateModal(false)
-                    setNewProjectName('')
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleCreateProject}
-                  disabled={!newProjectName.trim() || loading}
-                >
-                  {loading ? 'Creating...' : 'Create Project'}
-                </Button>
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4">
+            {/* Header with steps indicator */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Project</h3>
+              <div className="flex items-center space-x-4 mb-4">
+                <div className={`flex items-center space-x-2 ${createStep >= 1 ? 'text-blue-600' : 'text-gray-400'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                    createStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'
+                  }`}>
+                    1
+                  </div>
+                  <span className="font-medium">Project Details</span>
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400" />
+                <div className={`flex items-center space-x-2 ${createStep >= 2 ? 'text-blue-600' : 'text-gray-400'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                    createStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'
+                  }`}>
+                    2
+                  </div>
+                  <span className="font-medium">Parsing Method</span>
+                </div>
               </div>
             </div>
+
+            {/* Step 1: Project Name */}
+            {createStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-2">
+                    Project Name
+                  </label>
+                  <input
+                    type="text"
+                    id="projectName"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="Enter project name..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleNextStep()
+                      } else if (e.key === 'Escape') {
+                        handleCloseModal()
+                      }
+                    }}
+                    autoFocus
+                  />
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <Button variant="outline" onClick={handleCloseModal}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleNextStep}
+                    disabled={!newProjectName.trim()}
+                  >
+                    Next
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Parsing Method Selection */}
+            {createStep === 2 && (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">Choose Parsing Method</h4>
+                  <p className="text-gray-600 mb-4">This determines how resumes will be processed when uploaded.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div 
+                    className={`cursor-pointer transition-all border-2 rounded-lg p-4 ${
+                      selectedParsingMethod === 'full_text' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedParsingMethod('full_text')}
+                  >
+                    <div className="flex items-center space-x-3 mb-3">
+                      <FileText className={`h-6 w-6 ${selectedParsingMethod === 'full_text' ? 'text-blue-600' : 'text-gray-400'}`} />
+                      <h5 className="font-medium">Full Text Parsing</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Extract all text from resumes as-is. Simple and fast processing.
+                    </p>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                        <span>Fast processing</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                        <span>Works with any format</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div 
+                    className={`cursor-pointer transition-all border-2 rounded-lg p-4 ${
+                      selectedParsingMethod === 'section_based' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedParsingMethod('section_based')}
+                  >
+                    <div className="flex items-center space-x-3 mb-3">
+                      <Layers className={`h-6 w-6 ${selectedParsingMethod === 'section_based' ? 'text-blue-600' : 'text-gray-400'}`} />
+                      <h5 className="font-medium">Section-Based Parsing</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Parse resumes into structured sections for more precise matching.
+                    </p>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                        <span>Intelligent extraction</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                        <span>Better matching quality</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between">
+                  <Button variant="outline" onClick={handlePrevStep}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back
+                  </Button>
+                  <Button 
+                    onClick={handleCreateProject}
+                    disabled={loading}
+                  >
+                    {loading ? 'Creating...' : 'Create Project'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

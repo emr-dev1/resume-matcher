@@ -31,6 +31,7 @@ class Project(Base):
     resumes = relationship("Resume", back_populates="project", cascade="all, delete-orphan")
     matches = relationship("Match", back_populates="project", cascade="all, delete-orphan")
     processing_jobs = relationship("ProcessingJob", back_populates="project", cascade="all, delete-orphan")
+    parsing_config = relationship("ParsingConfiguration", back_populates="project", uselist=False, cascade="all, delete-orphan")
 
 
 class Position(Base):
@@ -56,6 +57,8 @@ class Resume(Base):
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     extracted_text = Column(Text)
+    parsed_sections = Column(JSON)  # Stores the 7 parsed sections
+    parsing_method = Column(String, default="full_text")  # 'full_text' or 'section_based'
     embedding = Column(LargeBinary)
     file_metadata = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -92,6 +95,21 @@ class ProcessingJob(Base):
     completed_at = Column(DateTime)
     
     project = relationship("Project", back_populates="processing_jobs")
+
+
+class ParsingConfiguration(Base):
+    __tablename__ = "parsing_configurations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), unique=True)
+    parsing_method = Column(String, default="full_text")  # 'full_text' or 'section_based'
+    section_headers = Column(JSON)  # Custom section header mappings
+    use_default_headers = Column(Integer, default=1)  # Boolean as integer
+    filter_strings = Column(JSON)  # Additional filter strings
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    project = relationship("Project", back_populates="parsing_config")
 
 
 async def init_db():

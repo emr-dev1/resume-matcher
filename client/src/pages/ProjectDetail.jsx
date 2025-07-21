@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, Upload, Play, Download, FileText, Users, RefreshCw, Clock } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Download, FileText, Users, RefreshCw, Clock, Settings } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DataTable from '@/components/table/DataTable'
 import ResultsTable from '@/components/table/ResultsTable'
+import ResumeDetailModal from '@/components/modals/ResumeDetailModal'
+import MatchDistributionChart from '@/components/charts/MatchDistributionChart'
+import QualityBreakdownChart from '@/components/charts/QualityBreakdownChart'
+import TopPositionsChart from '@/components/charts/TopPositionsChart'
+import MatchFilters from '@/components/filters/MatchFilters'
 import { useProjectStore, useUIStore, useUploadStore, useResultsStore, useProcessingStore } from '@/stores'
 import api from '@/services/api'
 
@@ -16,6 +21,12 @@ function ProjectDetail() {
   const [projectData, setProjectData] = useState(null)
   const [positions, setPositions] = useState([])
   const [resumes, setResumes] = useState([])
+  const [selectedResume, setSelectedResume] = useState(null)
+  const [showResumeModal, setShowResumeModal] = useState(false)
+  const [totalMatches, setTotalMatches] = useState(0)
+  const [matchStatistics, setMatchStatistics] = useState(null)
+  const [matchFilters, setMatchFilters] = useState({})
+  const [filteredMatches, setFilteredMatches] = useState([])
   // Use activeTab from UI store with fallback to local state
   const activeTab = projectDetailActiveTab || 'overview'
   const setActiveTab = setProjectDetailActiveTab
@@ -65,15 +76,38 @@ function ProjectDetail() {
     
     try {
       setLoadingMatches(true)
-      const matchesData = await api.getProjectMatches(projectId)
+      // Load all matches without limit and get total count
+      const [matchesData, countData] = await Promise.all([
+        api.getProjectMatches(projectId, { limit: null }), // Get all matches
+        api.getProjectMatchesCount(projectId)
+      ])
+      
       setMatches(matchesData)
+      setTotalMatches(countData.total_matches || 0)
+      
+      // Apply current filters to the new data
+      applyFilters(matchesData, matchFilters)
+      
       return matchesData
     } catch (error) {
       console.error('Error loading matches:', error)
       setMatches([])
+      setTotalMatches(0)
       return []
     } finally {
       setLoadingMatches(false)
+    }
+  }
+
+  const loadMatchStatistics = async (projectId) => {
+    if (!projectId) return
+    
+    try {
+      const stats = await api.getMatchStatistics(projectId)
+      setMatchStatistics(stats)
+    } catch (error) {
+      console.error('Error loading match statistics:', error)
+      setMatchStatistics(null)
     }
   }
 
@@ -82,7 +116,7 @@ function ProjectDetail() {
     
     setLoading(true)
     try {
-      // Load project details, positions, resumes, and matches
+      // Load project details, positions, resumes, matches, and statistics
       const [projectRes, positionsRes, resumesRes, matchesRes] = await Promise.all([
         api.getProject(selectedProject),
         api.getPositions(selectedProject),
@@ -93,6 +127,11 @@ function ProjectDetail() {
       setProjectData(projectRes)
       setPositions(positionsRes)
       setResumes(resumesRes)
+      
+      // Load statistics if we have matches
+      if (matchesRes && matchesRes.length > 0) {
+        loadMatchStatistics(selectedProject)
+      }
     } catch (error) {
       console.error('Error loading project data:', error)
     } finally {
@@ -122,6 +161,60 @@ function ProjectDetail() {
     }
   }
 
+  const handleConfigureParsing = () => {
+    setCurrentView('project-configure')
+  }
+
+  const handleResumeClick = (resume) => {
+    setSelectedResume(resume)
+    setShowResumeModal(true)
+  }
+
+  const handleCloseResumeModal = () => {
+    setShowResumeModal(false)
+    setSelectedResume(null)
+  }
+
+  const handleFiltersChange = (filters) => {
+    setMatchFilters(filters)
+    applyFilters(matches, filters)
+  }
+
+  const applyFilters = (matchesData, filters) => {
+    let filtered = [...matchesData]
+
+    // Apply minimum score filter
+    if (filters.minScore && filters.minScore > 0) {
+      filtered = filtered.filter(match => match.similarity_score >= parseFloat(filters.minScore))
+    }
+
+    // Apply position filter
+    if (filters.positionId) {
+      filtered = filtered.filter(match => match.position_id === parseInt(filters.positionId))
+    }
+
+    // Apply top N per position filter
+    if (filters.topN && parseInt(filters.topN) > 0) {
+      const topN = parseInt(filters.topN)
+      const groupedByPosition = filtered.reduce((acc, match) => {
+        if (!acc[match.position_id]) {
+          acc[match.position_id] = []
+        }
+        acc[match.position_id].push(match)
+        return acc
+      }, {})
+
+      // Keep only top N matches per position
+      filtered = Object.values(groupedByPosition).flatMap(positionMatches => 
+        positionMatches
+          .sort((a, b) => b.similarity_score - a.similarity_score)
+          .slice(0, topN)
+      )
+    }
+
+    setFilteredMatches(filtered)
+  }
+
   const isProcessingActive = processingStatus === 'processing' || processingStatus === 'pending'
 
   const handleExportMatches = async (format = 'csv') => {
@@ -134,6 +227,35 @@ function ProjectDetail() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleExportFiltered = (format = 'csv') => {
+    if (filteredMatches.length === 0) return
+
+    // Create CSV content from filtered matches
+    const headers = ['Rank', 'Resume', 'Match Score (%)', 'Position ID', 'Position Data']
+    const rows = filteredMatches.map(match => [
+      match.rank,
+      match.resume_filename,
+      Math.round(match.similarity_score * 100),
+      match.position_id,
+      JSON.stringify(match.position_data)
+    ])
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n')
+
+    // Download the filtered results
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `filtered_matches_${selectedProject}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
   }
 
   const positionColumns = [
@@ -237,14 +359,45 @@ function ProjectDetail() {
     {
       key: 'filename',
       label: 'Resume File',
-      render: (value) => (
-        <div className="flex items-center space-x-2">
+      render: (value, row) => (
+        <div 
+          className="flex items-center space-x-2 cursor-pointer hover:text-blue-600 transition-colors"
+          onClick={() => handleResumeClick(row)}
+        >
           <FileText className="h-4 w-4 text-blue-600" />
-          <span className="font-medium text-gray-900 truncate max-w-xs" title={value}>
+          <span className="font-medium text-gray-900 truncate max-w-xs hover:text-blue-600" title={value}>
             {value}
           </span>
         </div>
       )
+    },
+    {
+      key: 'parsing_method',
+      label: 'Parsing',
+      render: (value, row) => {
+        const method = value || 'full_text'
+        const hasSections = row.parsed_sections && Object.keys(row.parsed_sections).length > 0
+        return (
+          <div className="text-sm">
+            <div className="flex items-center space-x-2">
+              {method === 'section_based' ? (
+                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                  Section-Based
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                  Full Text
+                </span>
+              )}
+            </div>
+            {hasSections && (
+              <div className="text-xs text-gray-500 mt-1">
+                {Object.keys(row.parsed_sections).length} sections
+              </div>
+            )}
+          </div>
+        )
+      }
     },
     {
       key: 'extracted_text',
@@ -256,28 +409,11 @@ function ProjectDetail() {
           </div>
           {row.text_length && (
             <div className="text-xs text-gray-500 mt-1">
-              {row.text_length.toLocaleString()} characters extracted
+              {row.text_length.toLocaleString()} characters
             </div>
           )}
         </div>
       )
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      render: (value) => {
-        const colors = {
-          'processed': 'bg-green-100 text-green-800',
-          'processing': 'bg-yellow-100 text-yellow-800',
-          'failed': 'bg-red-100 text-red-800',
-          'pending': 'bg-gray-100 text-gray-800'
-        }
-        return (
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[value] || colors.processed}`}>
-            {value || 'processed'}
-          </span>
-        )
-      }
     },
     {
       key: 'created_at',
@@ -324,7 +460,7 @@ function ProjectDetail() {
     { id: 'overview', label: 'Overview', icon: FileText },
     { id: 'positions', label: `Positions (${positions.length})`, icon: Users },
     { id: 'resumes', label: `Resumes (${resumes.length})`, icon: FileText },
-    { id: 'matches', label: `Matches (${matches.length})`, icon: Play }
+    { id: 'matches', label: `Matches (${totalMatches})`, icon: Play }
   ]
 
   return (
@@ -367,6 +503,10 @@ function ProjectDetail() {
           <Button variant="ghost" size="sm" onClick={loadProjectData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
+          </Button>
+          <Button variant="outline" onClick={handleConfigureParsing}>
+            <Settings className="h-4 w-4 mr-2" />
+            Configure Parsing
           </Button>
           <Button variant="outline" onClick={handleUploadMore}>
             <Upload className="h-4 w-4 mr-2" />
@@ -414,45 +554,97 @@ function ProjectDetail() {
       {/* Tab Content */}
       <div className="space-y-6">
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Users className="h-5 w-5 text-blue-600" />
-                  <span>Positions</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{positions.length}</div>
-                <p className="text-xs text-gray-600">job positions uploaded</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <FileText className="h-5 w-5 text-green-600" />
-                  <span>Resumes</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{resumes.length}</div>
-                <p className="text-xs text-gray-600">resumes processed</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Play className="h-5 w-5 text-purple-600" />
-                  <span>Matches</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{matches.length}</div>
-                <p className="text-xs text-gray-600">matches found</p>
-              </CardContent>
-            </Card>
+          <div className="space-y-6">
+            {/* Summary Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Users className="h-5 w-5 text-blue-600" />
+                    <span>Positions</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{positions.length}</div>
+                  <p className="text-xs text-gray-600">job positions uploaded</p>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <FileText className="h-5 w-5 text-green-600" />
+                    <span>Resumes</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{resumes.length}</div>
+                  <p className="text-xs text-gray-600">resumes processed</p>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Play className="h-5 w-5 text-purple-600" />
+                    <span>Matches</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalMatches}</div>
+                  <p className="text-xs text-gray-600">matches found</p>
+                  {matchStatistics?.overall_stats && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Avg: {(matchStatistics.overall_stats.avg_score * 100).toFixed(1)}% match score
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Analytics Charts */}
+            {matchStatistics && totalMatches > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Match Score Distribution */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Match Score Distribution</CardTitle>
+                    <CardDescription>
+                      Distribution of similarity scores across all matches
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <MatchDistributionChart data={matchStatistics.score_distribution} />
+                  </CardContent>
+                </Card>
+
+                {/* Quality Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Match Quality Breakdown</CardTitle>
+                    <CardDescription>
+                      Categorization of matches by quality level
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <QualityBreakdownChart data={matchStatistics.quality_breakdown} />
+                  </CardContent>
+                </Card>
+
+                {/* Top Positions */}
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Top Performing Positions</CardTitle>
+                    <CardDescription>
+                      Positions with the most matches and their average scores
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <TopPositionsChart data={matchStatistics.top_positions} />
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
         )}
 
@@ -503,54 +695,114 @@ function ProjectDetail() {
         )}
 
         {activeTab === 'matches' && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Match Results</CardTitle>
-              <CardDescription>
-                AI-powered matches between resumes and job positions
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loadingMatches ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex items-center space-x-2">
-                    <svg className="h-5 w-5 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    <span className="text-sm text-gray-600">Loading matches...</span>
+          <div className="space-y-6">
+            {/* Filters */}
+            {matches.length > 0 && (
+              <MatchFilters
+                positions={positions}
+                onFiltersChange={handleFiltersChange}
+                initialFilters={matchFilters}
+              />
+            )}
+
+            {/* Results */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div>
+                    <span>Match Results</span>
+                    {filteredMatches.length !== matches.length && matches.length > 0 && (
+                      <span className="text-sm font-normal text-gray-600 ml-2">
+                        ({filteredMatches.length} of {matches.length} matches)
+                      </span>
+                    )}
                   </div>
-                </div>
-              ) : matches.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="space-y-2">
-                    <p className="text-gray-600">No matches found</p>
-                    <p className="text-sm text-gray-500">
-                      Upload positions and resumes, then run the matching process to see results
-                    </p>
-                    <div className="flex justify-center space-x-4 mt-4">
-                      <Button variant="outline" onClick={handleUploadMore}>
-                        Upload Files
+                  {filteredMatches.length > 0 && (
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleExportFiltered('csv')}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export Filtered
                       </Button>
-                      <Button onClick={handleRunMatching}>
-                        Run Matching
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleExportMatches('csv')}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export All
                       </Button>
                     </div>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  AI-powered matches between resumes and job positions
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingMatches ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <svg className="h-5 w-5 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span className="text-sm text-gray-600">Loading matches...</span>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <ResultsTable
-                  matches={matches}
-                  onViewDetails={(match) => {
-                    console.log('View match details:', match)
-                  }}
-                  onExport={handleExportMatches}
-                />
-              )}
-            </CardContent>
-          </Card>
+                ) : matches.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="space-y-2">
+                      <p className="text-gray-600">No matches found</p>
+                      <p className="text-sm text-gray-500">
+                        Upload positions and resumes, then run the matching process to see results
+                      </p>
+                      <div className="flex justify-center space-x-4 mt-4">
+                        <Button variant="outline" onClick={handleUploadMore}>
+                          Upload Files
+                        </Button>
+                        <Button onClick={handleRunMatching}>
+                          Run Matching
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : filteredMatches.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="space-y-2">
+                      <p className="text-gray-600">No matches meet the current filter criteria</p>
+                      <p className="text-sm text-gray-500">
+                        Try adjusting your filters to see more results
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <ResultsTable
+                    matches={filteredMatches}
+                    onViewDetails={(match) => {
+                      console.log('View match details:', match)
+                    }}
+                    onExport={handleExportFiltered}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
+
+      {/* Resume Detail Modal */}
+      {showResumeModal && (
+        <ResumeDetailModal
+          isOpen={showResumeModal}
+          onClose={handleCloseResumeModal}
+          resume={selectedResume}
+          projectId={selectedProject}
+        />
+      )}
     </div>
   )
 }

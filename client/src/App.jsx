@@ -3,6 +3,7 @@ import Dashboard from '@/pages/Dashboard'
 import ProjectDetail from '@/pages/ProjectDetail'
 import ProjectUpload from '@/pages/ProjectUpload'
 import ProjectProcess from '@/pages/ProjectProcess'
+import ProjectConfigure from '@/pages/ProjectConfigure'
 import Settings from '@/pages/Settings'
 import NotFound from '@/pages/NotFound'
 import { useUIStore } from '@/stores'
@@ -18,6 +19,8 @@ function App() {
         return <ProjectUpload />
       case 'project-process':
         return <ProjectProcess />
+      case 'project-configure':
+        return <ProjectConfigure />
       case 'settings':
         return <Settings />
       case 'not-found':
