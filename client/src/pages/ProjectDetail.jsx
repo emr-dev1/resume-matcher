@@ -290,6 +290,23 @@ function ProjectDetail() {
     window.URL.revokeObjectURL(url)
   }
 
+  const handleUploadMore = () => {
+    setCurrentView('project-upload')
+  }
+
+  const handleRunMatching = async () => {
+    try {
+      setLoading(true)
+      const result = await api.startProcessing(selectedProject)
+      console.log('Processing started:', result)
+      setCurrentView('project-process')
+    } catch (error) {
+      console.error('Error starting processing:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const positionColumns = [
     {
       key: 'id',
@@ -617,10 +634,18 @@ function ProjectDetail() {
         {activeTab === 'positions' && (
           <Card>
             <CardHeader>
-              <CardTitle>Job Positions</CardTitle>
-              <CardDescription>
-                All job positions uploaded for this project
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Job Positions</CardTitle>
+                  <CardDescription>
+                    All job positions uploaded for this project
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleUploadMore}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Positions
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[600px] overflow-y-auto">
@@ -642,10 +667,18 @@ function ProjectDetail() {
         {activeTab === 'resumes' && (
           <Card>
             <CardHeader>
-              <CardTitle>Resumes</CardTitle>
-              <CardDescription>
-                All resumes uploaded and processed for this project
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Resumes</CardTitle>
+                  <CardDescription>
+                    All resumes uploaded and processed for this project
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleUploadMore}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Resumes
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[600px] overflow-y-auto">

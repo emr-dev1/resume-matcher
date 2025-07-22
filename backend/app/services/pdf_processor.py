@@ -9,6 +9,7 @@ import io
 import tempfile
 
 from app.services.section_parser import section_parser
+from app.services.text_cleaner import text_cleaner
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +41,35 @@ class PDFProcessor:
             return None
     
     def extract_and_parse_pdf(self, file_path: str, parsing_method: str = "full_text", 
-                            custom_headers: Optional[Dict[str, Any]] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-        """Extract text and optionally parse into sections"""
+                            custom_headers: Optional[Dict[str, Any]] = None,
+                            clean_text: bool = True, cleaning_intensity: str = "medium") -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+        """Extract text, clean it, and optionally parse into sections"""
         try:
             # Extract raw text
-            text = self.extract_text_from_pdf(file_path)
-            if not text:
-                return None, None
+            raw_text = self.extract_text_from_pdf(file_path)
+            if not raw_text:
+                return None, None, None
+            
+            # Clean and optimize text for embedding
+            cleaned_text = None
+            if clean_text:
+                cleaned_text = text_cleaner.clean_and_optimize(
+                    raw_text, 
+                    intensity=cleaning_intensity,
+                    max_tokens=2000
+                )
+                logger.info(f"Text cleaning: {len(raw_text)} -> {len(cleaned_text)} chars")
+            else:
+                cleaned_text = raw_text
             
             # If section-based parsing is requested
             if parsing_method == "section_based":
                 # Extract filename from path
                 filename = os.path.basename(file_path)
                 
-                # Parse into sections
+                # Parse into sections using cleaned text for better results
                 parsed_sections = section_parser.parse_resume(
-                    text, 
+                    cleaned_text, 
                     filename=filename,
                     return_raw_sections=True
                 )
@@ -65,14 +79,14 @@ class PDFProcessor:
                     # TODO: Apply custom header mappings
                     pass
                 
-                return text, parsed_sections
+                return raw_text, cleaned_text, parsed_sections
             else:
-                # Just return raw text
-                return text, None
+                # Just return raw and cleaned text
+                return raw_text, cleaned_text, None
                 
         except Exception as e:
             logger.error(f"Error in extract_and_parse_pdf for {file_path}: {e}")
-            return None, None
+            return None, None, None
     
     def _extract_with_pypdf2(self, file_path: str) -> str:
         """Extract text using PyPDF2"""

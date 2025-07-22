@@ -191,14 +191,16 @@ async def upload_resumes(
                     })
                     continue
                 
-                # Extract text and optionally parse sections
-                extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
+                # Extract text, clean it, and optionally parse sections
+                raw_text, cleaned_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
                     file_path, 
                     parsing_method=parsing_method,
-                    custom_headers=custom_headers
+                    custom_headers=custom_headers,
+                    clean_text=True,
+                    cleaning_intensity="medium"
                 )
                 
-                if not extracted_text:
+                if not raw_text or not cleaned_text:
                     os.remove(file_path)
                     upload_results.append({
                         "filename": file.filename,
@@ -207,26 +209,33 @@ async def upload_resumes(
                     })
                     continue
                 
-                # Generate embedding
-                embedding = await embedding_service.generate_text_embedding(extracted_text)
+                # Generate embedding using cleaned text for better results
+                embedding = await embedding_service.generate_text_embedding(cleaned_text)
                 
                 # Create resume record
                 resume = Resume(
                     project_id=project_id,
                     filename=file.filename,
                     file_path=file_path,
-                    extracted_text=extracted_text,
+                    extracted_text=raw_text,  # Store original raw text
                     parsed_sections=parsed_sections.get('raw_sections') if parsed_sections else None,
                     parsing_method=parsing_method,
-                    embedding=embedding,
-                    file_metadata={"original_filename": file.filename}
+                    embedding=embedding,  # Generated from cleaned text
+                    file_metadata={
+                        "original_filename": file.filename,
+                        "cleaned_text_length": len(cleaned_text),
+                        "raw_text_length": len(raw_text),
+                        "compression_ratio": round((len(raw_text) - len(cleaned_text)) / len(raw_text) * 100, 1)
+                    }
                 )
                 db.add(resume)
                 
                 upload_results.append({
                     "filename": file.filename,
                     "status": "success",
-                    "text_length": len(extracted_text)
+                    "text_length": len(raw_text),
+                    "cleaned_text_length": len(cleaned_text),
+                    "compression_ratio": round((len(raw_text) - len(cleaned_text)) / len(raw_text) * 100, 1)
                 })
                 
             except Exception as e:
@@ -410,23 +419,34 @@ async def reparse_resume(
             custom_headers = parsing_config.section_headers
     
     try:
-        # Reparse the PDF
-        extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
+        # Reparse the PDF with text cleaning
+        raw_text, cleaned_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
             resume.file_path,
             parsing_method=parsing_method,
-            custom_headers=custom_headers
+            custom_headers=custom_headers,
+            clean_text=True,
+            cleaning_intensity="medium"
         )
         
-        if not extracted_text:
+        if not raw_text or not cleaned_text:
             raise HTTPException(status_code=400, detail="Could not extract text from PDF")
         
         # Update resume record
-        resume.extracted_text = extracted_text
+        resume.extracted_text = raw_text  # Store original raw text
         resume.parsed_sections = parsed_sections.get('raw_sections') if parsed_sections else None
         resume.parsing_method = parsing_method
         
-        # Regenerate embedding
-        resume.embedding = await embedding_service.generate_text_embedding(extracted_text)
+        # Update metadata with cleaning info
+        if not resume.file_metadata:
+            resume.file_metadata = {}
+        resume.file_metadata.update({
+            "cleaned_text_length": len(cleaned_text),
+            "raw_text_length": len(raw_text),
+            "compression_ratio": round((len(raw_text) - len(cleaned_text)) / len(raw_text) * 100, 1)
+        })
+        
+        # Regenerate embedding using cleaned text
+        resume.embedding = await embedding_service.generate_text_embedding(cleaned_text)
         
         await db.commit()
         
