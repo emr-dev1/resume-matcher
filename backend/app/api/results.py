@@ -64,7 +64,7 @@ async def get_project_matches_count(
 async def get_project_matches(
     project_id: int,
     position_id: Optional[int] = None,
-    limit: Optional[int] = 100,
+    limit: Optional[int] = None,
     offset: int = 0,
     min_score: Optional[float] = None,
     db: AsyncSession = Depends(get_db)

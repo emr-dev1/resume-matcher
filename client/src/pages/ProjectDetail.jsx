@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, Upload, Play, Download, FileText, Users, RefreshCw, Clock, Settings } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Download, FileText, Users, Play } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DataTable from '@/components/table/DataTable'
@@ -9,6 +9,7 @@ import MatchDistributionChart from '@/components/charts/MatchDistributionChart'
 import QualityBreakdownChart from '@/components/charts/QualityBreakdownChart'
 import TopPositionsChart from '@/components/charts/TopPositionsChart'
 import MatchFilters from '@/components/filters/MatchFilters'
+import MatchDetailModal from '@/components/modals/MatchDetailModal'
 import { useProjectStore, useUIStore, useUploadStore, useResultsStore, useProcessingStore } from '@/stores'
 import api from '@/services/api'
 
@@ -27,6 +28,8 @@ function ProjectDetail() {
   const [matchStatistics, setMatchStatistics] = useState(null)
   const [matchFilters, setMatchFilters] = useState({})
   const [filteredMatches, setFilteredMatches] = useState([])
+  const [selectedMatch, setSelectedMatch] = useState(null)
+  const [showMatchModal, setShowMatchModal] = useState(false)
   // Use activeTab from UI store with fallback to local state
   const activeTab = projectDetailActiveTab || 'overview'
   const setActiveTab = setProjectDetailActiveTab
@@ -85,9 +88,6 @@ function ProjectDetail() {
       setMatches(matchesData)
       setTotalMatches(countData.total_matches || 0)
       
-      // Apply current filters to the new data
-      applyFilters(matchesData, matchFilters)
-      
       return matchesData
     } catch (error) {
       console.error('Error loading matches:', error)
@@ -139,31 +139,6 @@ function ProjectDetail() {
     }
   }
 
-  const handleBackToDashboard = () => {
-    setCurrentView('dashboard')
-  }
-
-  const handleUploadMore = () => {
-    setCurrentView('project-upload')
-  }
-
-  const handleRunMatching = async () => {
-    try {
-      setLoading(true)
-      const result = await api.startProcessing(selectedProject)
-      console.log('Processing started:', result)
-      setCurrentView('project-process')
-    } catch (error) {
-      console.error('Error starting processing:', error)
-      // Could add toast notification here
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleConfigureParsing = () => {
-    setCurrentView('project-configure')
-  }
 
   const handleResumeClick = (resume) => {
     setSelectedResume(resume)
@@ -175,12 +150,21 @@ function ProjectDetail() {
     setSelectedResume(null)
   }
 
-  const handleFiltersChange = (filters) => {
-    setMatchFilters(filters)
-    applyFilters(matches, filters)
+  const handleMatchClick = (match) => {
+    setSelectedMatch(match)
+    setShowMatchModal(true)
   }
 
-  const applyFilters = (matchesData, filters) => {
+  const handleCloseMatchModal = () => {
+    setShowMatchModal(false)
+    setSelectedMatch(null)
+  }
+
+  const handleFiltersChange = useCallback((filters) => {
+    setMatchFilters(filters)
+  }, [])
+
+  const applyFilters = useCallback((matchesData, filters) => {
     let filtered = [...matchesData]
 
     // Apply minimum score filter
@@ -191,6 +175,37 @@ function ProjectDetail() {
     // Apply position filter
     if (filters.positionId) {
       filtered = filtered.filter(match => match.position_id === parseInt(filters.positionId))
+    }
+
+    // Apply global text search across position data
+    if (filters.textSearch && filters.textSearch.trim()) {
+      const searchTerm = filters.textSearch.toLowerCase().trim()
+      filtered = filtered.filter(match => {
+        if (!match.position_data) return false
+        return Object.values(match.position_data).some(value => 
+          String(value).toLowerCase().includes(searchTerm)
+        )
+      })
+    }
+
+    // Apply specific position field filter
+    if (filters.positionField && filters.positionValue && filters.positionValue.trim()) {
+      const fieldValue = filters.positionValue.toLowerCase().trim()
+      filtered = filtered.filter(match => {
+        if (!match.position_data || !match.position_data[filters.positionField]) return false
+        
+        const matchValue = String(match.position_data[filters.positionField]).toLowerCase()
+        
+        switch (filters.positionOperator) {
+          case 'equals':
+            return matchValue === fieldValue
+          case 'starts_with':
+            return matchValue.startsWith(fieldValue)
+          case 'contains':
+          default:
+            return matchValue.includes(fieldValue)
+        }
+      })
     }
 
     // Apply top N per position filter
@@ -213,7 +228,16 @@ function ProjectDetail() {
     }
 
     setFilteredMatches(filtered)
-  }
+  }, [])
+
+  // Apply filters when matches or filters change
+  useEffect(() => {
+    if (matches.length > 0) {
+      applyFilters(matches, matchFilters)
+    } else {
+      setFilteredMatches([])
+    }
+  }, [matches, matchFilters, applyFilters])
 
   const isProcessingActive = processingStatus === 'processing' || processingStatus === 'pending'
 
@@ -464,73 +488,7 @@ function ProjectDetail() {
   ]
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleBackToDashboard}
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Dashboard
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
-            <div className="flex items-center space-x-4 text-sm">
-              <span className="text-gray-600">
-                Created {new Date(project.created_at).toLocaleDateString()}
-              </span>
-              <span className="text-gray-600">•</span>
-              <span className="text-gray-600">Status: {project.status}</span>
-              {isProcessingActive && (
-                <>
-                  <span className="text-gray-600">•</span>
-                  <div className="flex items-center space-x-2">
-                    <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse"></div>
-                    <span className="text-blue-600 font-medium">
-                      {processingStatus === 'pending' ? 'Starting' : 'Processing'} 
-                      {progress > 0 && ` (${progress}%)`}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="ghost" size="sm" onClick={loadProjectData} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button variant="outline" onClick={handleConfigureParsing}>
-            <Settings className="h-4 w-4 mr-2" />
-            Configure Parsing
-          </Button>
-          <Button variant="outline" onClick={handleUploadMore}>
-            <Upload className="h-4 w-4 mr-2" />
-            Upload More
-          </Button>
-          <Button 
-            onClick={handleRunMatching} 
-            disabled={isProcessingActive || loading}
-          >
-            {isProcessingActive ? (
-              <>
-                <Clock className="h-4 w-4 mr-2 animate-spin" />
-                {processingStatus === 'pending' ? 'Starting...' : 'Processing...'}
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                Run Matching
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-
+    <div className="p-4 space-y-4">
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
@@ -552,11 +510,11 @@ function ProjectDetail() {
       </div>
 
       {/* Tab Content */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Summary Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
@@ -604,7 +562,7 @@ function ProjectDetail() {
 
             {/* Analytics Charts */}
             {matchStatistics && totalMatches > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Match Score Distribution */}
                 <Card>
                   <CardHeader>
@@ -656,17 +614,19 @@ function ProjectDetail() {
                 All job positions uploaded for this project
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <DataTable
-                data={positions}
-                columns={positionColumns}
-                sortable={true}
-                filterable={true}
-                selectable={true}
-                pagination={true}
-                pageSize={25}
-                className="excel-like"
-              />
+            <CardContent className="p-0">
+              <div className="max-h-[600px] overflow-y-auto">
+                <DataTable
+                  data={positions}
+                  columns={positionColumns}
+                  sortable={true}
+                  filterable={true}
+                  selectable={true}
+                  pagination={true}
+                  pageSize={25}
+                  className="excel-like"
+                />
+              </div>
             </CardContent>
           </Card>
         )}
@@ -679,27 +639,30 @@ function ProjectDetail() {
                 All resumes uploaded and processed for this project
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <DataTable
-                data={resumes}
-                columns={resumeColumns}
-                sortable={true}
-                filterable={true}
-                selectable={true}
-                pagination={true}
-                pageSize={25}
-                className="excel-like"
-              />
+            <CardContent className="p-0">
+              <div className="max-h-[600px] overflow-y-auto">
+                <DataTable
+                  data={resumes}
+                  columns={resumeColumns}
+                  sortable={true}
+                  filterable={true}
+                  selectable={true}
+                  pagination={true}
+                  pageSize={25}
+                  className="excel-like"
+                />
+              </div>
             </CardContent>
           </Card>
         )}
 
         {activeTab === 'matches' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Filters */}
             {matches.length > 0 && (
               <MatchFilters
                 positions={positions}
+                matches={matches}
                 onFiltersChange={handleFiltersChange}
                 initialFilters={matchFilters}
               />
@@ -707,42 +670,54 @@ function ProjectDetail() {
 
             {/* Results */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <div>
-                    <span>Match Results</span>
-                    {filteredMatches.length !== matches.length && matches.length > 0 && (
-                      <span className="text-sm font-normal text-gray-600 ml-2">
-                        ({filteredMatches.length} of {matches.length} matches)
-                      </span>
+              <CardContent className="p-0">
+                {/* Compact Toolbar */}
+                {matches.length > 0 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2">
+                        <Play className="h-4 w-4 text-gray-600" />
+                        <span className="text-sm font-medium text-gray-900">
+                          {filteredMatches.length !== matches.length && matches.length > 0 ? (
+                            `${filteredMatches.length} of ${matches.length} matches`
+                          ) : (
+                            `${matches.length} matches`
+                          )}
+                        </span>
+                      </div>
+                      {filteredMatches.length !== matches.length && matches.length > 0 && (
+                        <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                          Filtered
+                        </span>
+                      )}
+                    </div>
+                    
+                    {filteredMatches.length > 0 && (
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleExportFiltered('csv')}
+                          className="text-xs"
+                        >
+                          <Download className="h-3 w-3 mr-1" />
+                          Export Filtered
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleExportMatches('csv')}
+                          className="text-xs"
+                        >
+                          <Download className="h-3 w-3 mr-1" />
+                          Export All
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  {filteredMatches.length > 0 && (
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleExportFiltered('csv')}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Export Filtered
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleExportMatches('csv')}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Export All
-                      </Button>
-                    </div>
-                  )}
-                </CardTitle>
-                <CardDescription>
-                  AI-powered matches between resumes and job positions
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                )}
+                
+                <div className="p-4">
                 {loadingMatches ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="flex items-center space-x-2">
@@ -780,14 +755,15 @@ function ProjectDetail() {
                     </div>
                   </div>
                 ) : (
-                  <ResultsTable
-                    matches={filteredMatches}
-                    onViewDetails={(match) => {
-                      console.log('View match details:', match)
-                    }}
-                    onExport={handleExportFiltered}
-                  />
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <ResultsTable
+                      matches={filteredMatches}
+                      onViewDetails={handleMatchClick}
+                      onExport={handleExportFiltered}
+                    />
+                  </div>
                 )}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -800,6 +776,16 @@ function ProjectDetail() {
           isOpen={showResumeModal}
           onClose={handleCloseResumeModal}
           resume={selectedResume}
+          projectId={selectedProject}
+        />
+      )}
+
+      {/* Match Detail Modal */}
+      {showMatchModal && (
+        <MatchDetailModal
+          isOpen={showMatchModal}
+          onClose={handleCloseMatchModal}
+          match={selectedMatch}
           projectId={selectedProject}
         />
       )}

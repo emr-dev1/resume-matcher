@@ -105,18 +105,7 @@ function ResultsTable({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">
-            Match Results ({matches.length} matches)
-          </h3>
-          <p className="text-sm text-gray-600">
-            Ranked by similarity score from AI embeddings
-          </p>
-        </div>
-      </div>
-
+    <div>
       <DataTable
         data={matches}
         columns={columns}

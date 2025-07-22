@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from typing import List, Dict, Any
@@ -409,3 +410,30 @@ async def reparse_resume(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Error reparsing resume: {str(e)}")
+
+
+@router.get("/resumes/{resume_id}/pdf")
+async def get_resume_pdf(
+    resume_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Serve the PDF file for a resume"""
+    # Get resume
+    result = await db.execute(
+        select(Resume).where(Resume.id == resume_id)
+    )
+    resume = result.scalar_one_or_none()
+    
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    
+    # Check if file exists
+    if not resume.file_path or not os.path.exists(resume.file_path):
+        raise HTTPException(status_code=404, detail="PDF file not found")
+    
+    # Return the PDF file
+    return FileResponse(
+        path=resume.file_path,
+        media_type="application/pdf",
+        filename=resume.filename
+    )

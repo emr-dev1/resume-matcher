@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Upload, FileText, Users, CheckCircle, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Upload, FileText, Users, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import FileUpload from '@/components/FileUpload'
@@ -225,12 +225,20 @@ function ProjectUpload() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <FileUpload
-                onFilesSelected={handlePositionFileSelected}
-                accept=".csv,.xlsx,.xls"
-                multiple={false}
-                label="Supported formats: CSV, Excel (.xlsx, .xls)"
-              />
+              {uploading ? (
+                <div className="py-8 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
+                  <p className="text-sm text-gray-600">Processing position file...</p>
+                  <p className="text-xs text-gray-500 mt-1">This may take a few moments</p>
+                </div>
+              ) : (
+                <FileUpload
+                  onFilesSelected={handlePositionFileSelected}
+                  accept=".csv,.xlsx,.xls"
+                  multiple={false}
+                  label="Supported formats: CSV, Excel (.xlsx, .xls)"
+                />
+              )}
             </CardContent>
           </Card>
 
@@ -274,11 +282,19 @@ function ProjectUpload() {
                 Choose Different File
               </Button>
               
-              <ColumnSelector
-                columns={positionData.columns || []}
-                preview={positionData.preview || []}
-                onConfirm={handleColumnConfirmation}
-              />
+              {uploading ? (
+                <div className="py-8 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
+                  <p className="text-sm text-gray-600">Configuring columns and generating embeddings...</p>
+                  <p className="text-xs text-gray-500 mt-1">This process may take a minute depending on the number of positions</p>
+                </div>
+              ) : (
+                <ColumnSelector
+                  columns={positionData.columns || []}
+                  preview={positionData.preview || []}
+                  onConfirm={handleColumnConfirmation}
+                />
+              )}
             </div>
           </CardContent>
         </Card>
@@ -319,22 +335,40 @@ function ProjectUpload() {
 
             {uploadType === 'resumes' && !uploadResults && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  Ready to upload {resumeFiles.length} resume files. This may take a few minutes as we extract text and generate embeddings.
-                </p>
-                
-                <div className="flex space-x-4">
-                  <Button 
-                    onClick={handleResumeUpload}
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Uploading...' : `Upload ${resumeFiles.length} Resumes`}
-                  </Button>
-                  <Button variant="outline" onClick={handleBackToSelection}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Choose Different Files
-                  </Button>
-                </div>
+                {uploading ? (
+                  <div className="py-8 text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-green-600 mx-auto mb-4" />
+                    <p className="text-sm font-semibold text-gray-700 mb-2">
+                      Uploading {resumeFiles.length} resume{resumeFiles.length > 1 ? 's' : ''}...
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Extracting text and generating embeddings for each resume
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      This may take a few minutes depending on file sizes
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600">
+                      Ready to upload {resumeFiles.length} resume file{resumeFiles.length > 1 ? 's' : ''}. This may take a few minutes as we extract text and generate embeddings.
+                    </p>
+                    
+                    <div className="flex space-x-4">
+                      <Button 
+                        onClick={handleResumeUpload}
+                        disabled={uploading}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Upload {resumeFiles.length} Resume{resumeFiles.length > 1 ? 's' : ''}
+                      </Button>
+                      <Button variant="outline" onClick={handleBackToSelection}>
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Choose Different Files
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

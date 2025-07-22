@@ -29,7 +29,10 @@ function DataTable({
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedRows, setSelectedRows] = useState(new Set())
   const [currentPage, setCurrentPage] = useState(1)
+  const [currentPageSize, setCurrentPageSize] = useState(pageSize)
   const [showExportDropdown, setShowExportDropdown] = useState(false)
+
+  const pageSizeOptions = [25, 50, 100, 200, 500]
 
   // Filter data based on search query
   const filteredData = useMemo(() => {
@@ -70,11 +73,16 @@ function DataTable({
   const paginatedData = useMemo(() => {
     if (!pagination) return sortedData
     
-    const startIndex = (currentPage - 1) * pageSize
-    return sortedData.slice(startIndex, startIndex + pageSize)
-  }, [sortedData, currentPage, pageSize, pagination])
+    const startIndex = (currentPage - 1) * currentPageSize
+    return sortedData.slice(startIndex, startIndex + currentPageSize)
+  }, [sortedData, currentPage, currentPageSize, pagination])
 
-  const totalPages = Math.ceil(sortedData.length / pageSize)
+  const totalPages = Math.ceil(sortedData.length / currentPageSize)
+  
+  const handlePageSizeChange = (newPageSize) => {
+    setCurrentPageSize(newPageSize)
+    setCurrentPage(1) // Reset to first page when changing page size
+  }
 
   const handleSort = (columnKey) => {
     if (!sortable) return
@@ -274,62 +282,82 @@ function DataTable({
       </div>
 
       {/* Pagination */}
-      {pagination && totalPages > 1 && (
+      {pagination && (
         <div className="px-4 py-3 border-t border-gray-200 bg-gray-50 rounded-b-lg">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-gray-700">
-              Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length} results
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage(currentPage - 1)}
-              >
-                Previous
-              </Button>
-              
-              <div className="flex items-center space-x-1">
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  const page = i + 1
-                  return (
-                    <Button
-                      key={page}
-                      variant={currentPage === page ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setCurrentPage(page)}
-                      className="w-8 h-8 p-0"
-                    >
-                      {page}
-                    </Button>
-                  )
-                })}
-                {totalPages > 5 && (
-                  <>
-                    <span className="text-gray-500">...</span>
-                    <Button
-                      variant={currentPage === totalPages ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setCurrentPage(totalPages)}
-                      className="w-8 h-8 p-0"
-                    >
-                      {totalPages}
-                    </Button>
-                  </>
-                )}
+            <div className="flex items-center space-x-4">
+              <div className="text-sm text-gray-700">
+                Showing {((currentPage - 1) * currentPageSize) + 1} to {Math.min(currentPage * currentPageSize, sortedData.length)} of {sortedData.length} results
               </div>
               
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage(currentPage + 1)}
-              >
-                Next
-              </Button>
+              {/* Page Size Selector */}
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">Show:</span>
+                <select
+                  value={currentPageSize}
+                  onChange={(e) => handlePageSizeChange(parseInt(e.target.value))}
+                  className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {pageSizeOptions.map(size => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                  <option value={sortedData.length}>All ({sortedData.length})</option>
+                </select>
+              </div>
             </div>
+            
+            {/* Page Navigation - only show if multiple pages */}
+            {totalPages > 1 && currentPageSize < sortedData.length && (
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                >
+                  Previous
+                </Button>
+                
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const page = i + 1
+                    return (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? 'primary' : 'ghost'}
+                        size="sm"
+                        onClick={() => setCurrentPage(page)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {page}
+                      </Button>
+                    )
+                  })}
+                  {totalPages > 5 && (
+                    <>
+                      <span className="text-gray-500">...</span>
+                      <Button
+                        variant={currentPage === totalPages ? 'primary' : 'ghost'}
+                        size="sm"
+                        onClick={() => setCurrentPage(totalPages)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {totalPages}
+                      </Button>
+                    </>
+                  )}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
