@@ -146,80 +146,109 @@ async def upload_resumes(
     
     upload_results = []
     
-    for file in files:
-        if not file.filename.endswith('.pdf'):
-            upload_results.append({
-                "filename": file.filename,
-                "status": "error",
-                "message": "Not a PDF file"
-            })
-            continue
-        
-        try:
-            # Save file
-            file_id = str(uuid.uuid4())
-            file_path = os.path.join(settings.upload_dir, f"{file_id}.pdf")
-            
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            
-            # Validate PDF
-            if not pdf_processor.validate_pdf(file_path):
-                os.remove(file_path)
-                upload_results.append({
-                    "filename": file.filename,
-                    "status": "error",
-                    "message": "Invalid PDF file"
-                })
-                continue
-            
-            # Extract text and optionally parse sections
-            extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
-                file_path, 
-                parsing_method=parsing_method,
-                custom_headers=custom_headers
-            )
-            
-            if not extracted_text:
-                os.remove(file_path)
-                upload_results.append({
-                    "filename": file.filename,
-                    "status": "error",
-                    "message": "Could not extract text from PDF"
-                })
-                continue
-            
-            # Generate embedding
-            embedding = await embedding_service.generate_text_embedding(extracted_text)
-            
-            # Create resume record
-            resume = Resume(
-                project_id=project_id,
-                filename=file.filename,
-                file_path=file_path,
-                extracted_text=extracted_text,
-                parsed_sections=parsed_sections.get('raw_sections') if parsed_sections else None,
-                parsing_method=parsing_method,
-                embedding=embedding,
-                file_metadata={"original_filename": file.filename}
-            )
-            db.add(resume)
-            
-            upload_results.append({
-                "filename": file.filename,
-                "status": "success",
-                "text_length": len(extracted_text)
-            })
-            
-        except Exception as e:
-            upload_results.append({
-                "filename": file.filename,
-                "status": "error",
-                "message": str(e)
-            })
+    # Process files in smaller batches to prevent timeouts and memory issues
+    batch_size = 50  # Process 50 files at a time
+    total_files = len(files)
     
-    await db.commit()
+    # Log upload start for large batches
+    if total_files > 100:
+        print(f"Starting large upload: {total_files} files, processing in batches of {batch_size}")
+    
+    for batch_start in range(0, total_files, batch_size):
+        batch_end = min(batch_start + batch_size, total_files)
+        batch_files = files[batch_start:batch_end]
+        
+        # Log progress for large uploads
+        if total_files > 100:
+            print(f"Processing batch {batch_start//batch_size + 1}/{(total_files + batch_size - 1)//batch_size}: files {batch_start + 1}-{batch_end}")
+        
+        # Process current batch
+        for file in batch_files:
+            if not file.filename.endswith('.pdf'):
+                upload_results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "message": "Not a PDF file"
+                })
+                continue
+        
+            try:
+                # Save file
+                file_id = str(uuid.uuid4())
+                file_path = os.path.join(settings.upload_dir, f"{file_id}.pdf")
+                
+                with open(file_path, "wb") as f:
+                    content = await file.read()
+                    f.write(content)
+                
+                # Validate PDF
+                if not pdf_processor.validate_pdf(file_path):
+                    os.remove(file_path)
+                    upload_results.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "message": "Invalid PDF file"
+                    })
+                    continue
+                
+                # Extract text and optionally parse sections
+                extracted_text, parsed_sections = pdf_processor.extract_and_parse_pdf(
+                    file_path, 
+                    parsing_method=parsing_method,
+                    custom_headers=custom_headers
+                )
+                
+                if not extracted_text:
+                    os.remove(file_path)
+                    upload_results.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "message": "Could not extract text from PDF"
+                    })
+                    continue
+                
+                # Generate embedding
+                embedding = await embedding_service.generate_text_embedding(extracted_text)
+                
+                # Create resume record
+                resume = Resume(
+                    project_id=project_id,
+                    filename=file.filename,
+                    file_path=file_path,
+                    extracted_text=extracted_text,
+                    parsed_sections=parsed_sections.get('raw_sections') if parsed_sections else None,
+                    parsing_method=parsing_method,
+                    embedding=embedding,
+                    file_metadata={"original_filename": file.filename}
+                )
+                db.add(resume)
+                
+                upload_results.append({
+                    "filename": file.filename,
+                    "status": "success",
+                    "text_length": len(extracted_text)
+                })
+                
+            except Exception as e:
+                upload_results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "message": str(e)
+                })
+        
+        # Commit batch to database to prevent timeout on large uploads
+        try:
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            # Mark remaining files in this batch as failed
+            for file in batch_files:
+                if not any(r["filename"] == file.filename for r in upload_results):
+                    upload_results.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "message": f"Database commit failed: {str(e)}"
+                    })
     
     success_count = sum(1 for r in upload_results if r["status"] == "success")
     

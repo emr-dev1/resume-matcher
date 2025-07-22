@@ -32,7 +32,17 @@ function ProjectDetail() {
   const [showMatchModal, setShowMatchModal] = useState(false)
   // Use activeTab from UI store with fallback to local state
   const activeTab = projectDetailActiveTab || 'overview'
-  const setActiveTab = setProjectDetailActiveTab
+  const setActiveTab = (tabId) => {
+    setProjectDetailActiveTab(tabId)
+    
+    // Lazy load matches when matches tab is clicked
+    if (tabId === 'matches' && matches.length === 0 && totalMatches > 0) {
+      loadMatches(selectedProject)
+      if (totalMatches > 0) {
+        loadMatchStatistics(selectedProject)
+      }
+    }
+  }
   
   // Track previous processing status for auto-refresh
   const previousStatus = useRef(processingStatus)
@@ -74,25 +84,21 @@ function ProjectDetail() {
     previousStatus.current = processingStatus
   }, [processingStatus, selectedProject])
 
-  const loadMatches = async (projectId) => {
+  const loadMatches = async (projectId, options = {}) => {
     if (!projectId) return []
     
     try {
       setLoadingMatches(true)
-      // Load all matches without limit and get total count
-      const [matchesData, countData] = await Promise.all([
-        api.getProjectMatches(projectId, { limit: null }), // Get all matches
-        api.getProjectMatchesCount(projectId)
-      ])
+      // Load matches with pagination (default 1000 limit for performance)
+      const { limit = 1000, offset = 0 } = options
+      const matchesData = await api.getProjectMatches(projectId, { limit, offset })
       
       setMatches(matchesData)
-      setTotalMatches(countData.total_matches || 0)
       
       return matchesData
     } catch (error) {
       console.error('Error loading matches:', error)
       setMatches([])
-      setTotalMatches(0)
       return []
     } finally {
       setLoadingMatches(false)
@@ -116,20 +122,22 @@ function ProjectDetail() {
     
     setLoading(true)
     try {
-      // Load project details, positions, resumes, matches, and statistics
-      const [projectRes, positionsRes, resumesRes, matchesRes] = await Promise.all([
+      // Load project details, positions, and resumes only
+      // Matches will be loaded lazily when the matches tab is clicked
+      const [projectRes, positionsRes, resumesRes, countData] = await Promise.all([
         api.getProject(selectedProject),
         api.getPositions(selectedProject),
         api.getResumes(selectedProject),
-        loadMatches(selectedProject)
+        api.getProjectMatchesCount(selectedProject)
       ])
       
       setProjectData(projectRes)
       setPositions(positionsRes)
       setResumes(resumesRes)
+      setTotalMatches(countData.total_matches || 0)
       
-      // Load statistics if we have matches
-      if (matchesRes && matchesRes.length > 0) {
+      // Load statistics only if we have matches and matches tab is active
+      if (countData.total_matches > 0 && activeTab === 'matches') {
         loadMatchStatistics(selectedProject)
       }
     } catch (error) {

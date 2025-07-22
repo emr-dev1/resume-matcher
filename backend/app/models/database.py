@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey, JSON, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey, JSON, LargeBinary, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -71,16 +71,21 @@ class Match(Base):
     __tablename__ = "matches"
     
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    position_id = Column(Integer, ForeignKey("positions.id"))
-    resume_id = Column(Integer, ForeignKey("resumes.id"))
-    similarity_score = Column(Float, nullable=False)
-    rank = Column(Integer)
+    project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    position_id = Column(Integer, ForeignKey("positions.id"), index=True)
+    resume_id = Column(Integer, ForeignKey("resumes.id"), index=True)
+    similarity_score = Column(Float, nullable=False, index=True)
+    rank = Column(Integer, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     project = relationship("Project", back_populates="matches")
     position = relationship("Position", back_populates="matches")
     resume = relationship("Resume", back_populates="matches")
+    
+    __table_args__ = (
+        Index('idx_match_project_position_rank', 'project_id', 'position_id', 'rank'),
+        Index('idx_match_project_score', 'project_id', 'similarity_score'),
+    )
 
 
 class ProcessingJob(Base):

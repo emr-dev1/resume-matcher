@@ -1,12 +1,14 @@
-import { Menu, Bell, User, ArrowLeft, RefreshCw, Settings, Upload, Play, Clock } from 'lucide-react'
+import { Menu, Bell, User, ArrowLeft, RefreshCw, Settings, Upload, Play, Clock, Loader2 } from 'lucide-react'
 import { useUIStore, useProjectStore, useProcessingStore } from '@/stores'
 import Button from '@/components/ui/Button'
 import api from '@/services/api'
+import { useState } from 'react'
 
 function Header() {
   const { setSidebarMobile, currentView, setCurrentView } = useUIStore()
   const { selectedProject, projects, loading, setLoading } = useProjectStore()
   const { processingStatus, progress } = useProcessingStore()
+  const [isStartingMatch, setIsStartingMatch] = useState(false)
 
   // Get current project data
   const project = projects.find(p => p.id === selectedProject)
@@ -41,13 +43,16 @@ function Header() {
 
   const handleRunMatching = async () => {
     try {
+      setIsStartingMatch(true)
       setLoading(true)
       const result = await api.startProcessing(selectedProject)
       console.log('Processing started:', result)
       setCurrentView('project-process')
     } catch (error) {
       console.error('Error starting processing:', error)
+      // TODO: Add toast notification for error
     } finally {
+      setIsStartingMatch(false)
       setLoading(false)
     }
   }
@@ -123,13 +128,19 @@ function Header() {
               variant="outline"
               size="sm"
               onClick={handleRunMatching} 
-              disabled={isProcessingActive || loading}
+              disabled={isProcessingActive || loading || isStartingMatch}
               className="text-xs"
             >
-              {isProcessingActive ? (
+              {isStartingMatch ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Initializing...
+                </>
+              ) : isProcessingActive ? (
                 <>
                   <Clock className="h-4 w-4 mr-1 animate-spin" />
                   {processingStatus === 'pending' ? 'Starting...' : 'Processing...'}
+                  {progress > 0 && ` (${progress}%)`}
                 </>
               ) : (
                 <>

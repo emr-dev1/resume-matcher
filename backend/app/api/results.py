@@ -64,13 +64,13 @@ async def get_project_matches_count(
 async def get_project_matches(
     project_id: int,
     position_id: Optional[int] = None,
-    limit: Optional[int] = None,
+    limit: Optional[int] = 1000,  # Default limit to prevent huge loads
     offset: int = 0,
     min_score: Optional[float] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Get match results for a project"""
-    query = select(Match, Resume, Position).join(Resume).join(Position).where(
+    query = select(Match, Resume.filename, Position.original_data, Position.output_columns).join(Resume).join(Position).where(
         Match.project_id == project_id
     )
     
@@ -91,15 +91,22 @@ async def get_project_matches(
     result = await db.execute(query)
     
     matches = []
-    for match, resume, position in result:
+    for match, resume_filename, position_original_data, position_output_columns in result:
+        # Only include essential position data to reduce payload size
+        essential_position_data = {}
+        if position_original_data and position_output_columns:
+            # Limit to first 5 columns to reduce data transfer
+            limited_columns = position_output_columns[:5] if len(position_output_columns) > 5 else position_output_columns
+            essential_position_data = clean_nan_values({col: position_original_data.get(col) for col in limited_columns})
+        
         matches.append(MatchResult(
             match_id=match.id,
             position_id=match.position_id,
             resume_id=match.resume_id,
-            resume_filename=resume.filename,
+            resume_filename=resume_filename,
             similarity_score=match.similarity_score,
             rank=match.rank,
-            position_data=clean_nan_values({col: position.original_data.get(col) for col in position.output_columns})
+            position_data=essential_position_data
         ))
     
     return matches
