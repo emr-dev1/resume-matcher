@@ -112,7 +112,7 @@ class TextCleaner:
         text = text.encode('utf-8', errors='ignore').decode('utf-8')
         
         # Normalize unicode characters
-        text = re.sub(r'[""''']', '"', text)  # Smart quotes to regular quotes
+        text = re.sub(r'[""'']', '"', text)  # Smart quotes to regular quotes
         text = re.sub(r'[–—]', '-', text)     # Em/en dashes to hyphens
         text = re.sub(r'[…]', '...', text)    # Ellipsis
         
